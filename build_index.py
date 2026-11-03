@@ -167,8 +167,10 @@ def crawl_course_details(page_url):
 
 def load_existing_courses(index_path="index.html"):
     if not os.path.exists(index_path):
-        if index_path == "index.html" and os.path.exists("index_compressed.html"):
-            index_path = "index_compressed.html"
+        for cand in ["index.html", "index_order_keliru.html", "index_compressed.html", "index_ori.html"]:
+            if os.path.exists(cand):
+                index_path = cand
+                break
         else:
             return []
     try:
@@ -290,18 +292,6 @@ def main():
         for p in range(1, max_pages + 1):
             catalog_items.extend(page_dict.get(p, []))
 
-        # Petakan ranking rilis (1 = terbaru, 952 = terlama)
-        rank_map = {}
-        for rank, it in enumerate(catalog_items, 1):
-            if it.get('sku'): rank_map[it['sku']] = rank
-            if it.get('cid'): rank_map[it['cid']] = rank
-            if it.get('name'): rank_map[it['name'].lower()] = rank
-
-        for c in courses_map.values():
-            r = rank_map.get(c.get('k')) or rank_map.get(c.get('i')) or rank_map.get((c.get('t') or '').lower())
-            if r:
-                c['r'] = r
-
         # Cari kursus yang belum ada di basis data
         new_items = []
         for it in catalog_items:
@@ -347,8 +337,21 @@ def main():
         else:
             print(f"[*] Katalog online sudah sinkron dengan basis data ({len(courses_map)} kursus).")
 
-    # 5. Kompilasi ke index.html
+        # 5. Petakan ranking rilis (1 = terbaru, 952 = terlama) ke SELURUH kursus
+        rank_map = {}
+        for rank, it in enumerate(catalog_items, 1):
+            if it.get('sku'): rank_map[it['sku']] = rank
+            if it.get('cid'): rank_map[it['cid']] = rank
+            if it.get('name'): rank_map[it['name'].lower()] = rank
+
+        for c in courses_map.values():
+            r = rank_map.get(c.get('k')) or rank_map.get(c.get('i')) or rank_map.get((c.get('t') or '').lower())
+            if r is not None:
+                c['r'] = r
+
+    # 6. Kompilasi ke index.html
     courses_list = list(courses_map.values())
+    courses_list.sort(key=lambda x: x.get('r', 9999))
     build_index_html(courses_list, "index.html")
 
 # Template HTML SPA mandiri (raw string, tanpa modifikasi backslash)
@@ -1329,8 +1332,18 @@ TEMPLATE_HTML = r"""<!DOCTYPE html>
 
             // Sorting
             filteredCourses.sort((a, b) => {
-                if (currentSort === "newest") return (a.r || 9999) - (b.r || 9999);
-                if (currentSort === "oldest") return (b.r || 0) - (a.r || 0);
+                if (currentSort === "newest") {
+                    const rA = a.r !== undefined ? a.r : 9999;
+                    const rB = b.r !== undefined ? b.r : 9999;
+                    if (rA !== rB) return rA - rB;
+                    return (parseInt(b.i || 0) || 0) - (parseInt(a.i || 0) || 0);
+                }
+                if (currentSort === "oldest") {
+                    const rA = a.r !== undefined ? a.r : 0;
+                    const rB = b.r !== undefined ? b.r : 0;
+                    if (rA !== rB) return rB - rA;
+                    return (parseInt(a.i || 0) || 0) - (parseInt(b.i || 0) || 0);
+                }
                 const titleA = a.t || '';
                 const titleB = b.t || '';
                 if (currentSort === "title_asc") return titleA.localeCompare(titleB);
